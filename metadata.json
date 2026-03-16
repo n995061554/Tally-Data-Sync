@@ -1,0 +1,5 @@
+{
+  "name": "Tally Data Sync",
+  "description": "A desktop application interface to manage and monitor the synchronization of Tally ERP data with a cloud backend, inspired by the architectural design of modern sync tools.",
+  "requestFramePermissions": []
+}
