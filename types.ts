@@ -32,7 +32,10 @@ export interface LogEntry {
 }
 
 export interface TallyConfig {
+  host: string;
   port: string;
+  username?: string;
+  password?: string;
   companyId: string;
   apiKey: string;
   syncInterval: number;
