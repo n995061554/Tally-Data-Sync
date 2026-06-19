@@ -2,15 +2,14 @@
   "name": "tally-data-sync",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && tsc electron/main.ts --outDir dist-electron --module commonjs --target es6 --esModuleInterop && electron .\"",
-    "electron:build": "npm run build && tsc electron/main.ts --outDir dist-electron --module commonjs --target es6 --esModuleInterop && electron-builder"
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && node scripts/build-electron.js && electron .\"",
+    "electron:build": "npm run build && node scripts/build-electron.js && electron-builder"
   },
   "build": {
     "appId": "com.tally.sync",
