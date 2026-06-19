@@ -39,7 +39,10 @@ export interface TallyConfig {
   companyId: string;
   apiKey: string;
   syncInterval: number;
+  autoSyncEnabled: boolean;
   permissionMode: PermissionMode;
+  companyName: string;         // e.g. "Patel Export Services"
+  financialYear: string;       // e.g. "2026-2027"
 }
 
 export interface Ledger {
@@ -48,13 +51,69 @@ export interface Ledger {
   group: string;
   balance: number;
   lastUpdated: string;
+  // Expanded fields for Customer Profile 360 & MobileCRM:
+  mobile?: string;
+  email?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  gstin?: string;
+  pan?: string;
+  creditLimit?: number;
+  creditDays?: number;
+  openingBalance?: number;
+  contactPerson?: string;
+  parentGroup?: string;
 }
 
 export interface Voucher {
   guid: string;
-  type: string;
+  type: 'Sales' | 'Receipt' | 'Payment' | 'Journal' | 'Credit Note' | 'Debit Note';
   date: string;
   party: string;
   amount: number;
   syncStatus: 'Synced' | 'Pending';
+  narrations?: string;
+  instrumentMode?: string;
+}
+
+export interface StockItem {
+  guid: string;
+  name: string;
+  code?: string;
+  sku?: string;
+  category?: string;
+  brand?: string;
+  unit?: string;
+  gstRate?: number;
+  hsnCode?: string;
+  openingStock?: number;
+  closingStock: number;
+  godown?: string;
+  rate?: number;
+}
+
+export interface OutstandingBill {
+  guid: string;
+  customerGuid: string;
+  customerName: string;
+  invoiceNo: string;
+  invoiceDate: string;
+  dueDate: string;
+  billAmount: number;
+  receivedAmount: number;
+  balanceAmount: number;
+  overdueDays: number;
+}
+
+export interface CollectionRecord {
+  id: string;
+  date: string;
+  customerGuid: string;
+  customerName: string;
+  amount: number;
+  mode: 'Cash' | 'Cheque' | 'UPI' | 'Bank Transfer';
+  referenceNo?: string;
+  status: 'Pending Sync' | 'Synced to Tally' | 'Rejected';
+  salesman?: string;
 }

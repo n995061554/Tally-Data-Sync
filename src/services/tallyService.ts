@@ -98,7 +98,7 @@ export const fetchTallyData = async (config: TallyConfig, type: 'LEDGER' | 'VOUC
         const node = voucherNodes[i];
         vouchers.push({
           guid: node.getAttribute('REMOTEID') || `voucher-${i}`,
-          type: node.getElementsByTagName('VOUCHERTYPENAME')[0]?.textContent || 'Unknown',
+          type: (node.getElementsByTagName('VOUCHERTYPENAME')[0]?.textContent || 'Sales') as Voucher['type'],
           date: node.getElementsByTagName('DATE')[0]?.textContent || 'Unknown',
           party: node.getElementsByTagName('PARTYLEDGERNAME')[0]?.textContent || 'Unknown',
           amount: parseFloat(node.getElementsByTagName('AMOUNT')[0]?.textContent || '0'),

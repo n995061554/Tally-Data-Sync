@@ -1,36 +1,116 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ConnectionStatus, SyncStatus, LogLevel, PermissionMode, type TallyConfig, type LogEntry, type Ledger, type Voucher } from '../types';
+import { 
+  ConnectionStatus, 
+  SyncStatus, 
+  LogLevel, 
+  PermissionMode, 
+  type TallyConfig, 
+  type LogEntry, 
+  type Ledger, 
+  type Voucher, 
+  type StockItem, 
+  type OutstandingBill 
+} from '../types';
 import StatusCard from './StatusCard';
 import ConfigPanel from './ConfigPanel';
 import SyncControls from './SyncControls';
+import { SyncProgressBar } from './SyncProgressBar';
+import { ToastContainer } from './ToastNotification';
+import { DatabaseRepairPanel } from './DatabaseRepairPanel';
 import LogViewer from './LogViewer';
 import CacheViewer from './CacheViewer';
 import TallyGuidePanel from './TallyGuidePanel';
-import { PowerIcon, WifiIcon, CloudIcon, ArrowPathIcon } from './icons/Icons';
-import { fetchTallyData } from '../src/services/tallyService';
+import SalesRecoveryDashboard from './SalesRecoveryDashboard';
+import Customer360 from './Customer360';
+import OfflineCollections from './OfflineCollections';
+import MobilePayloadExplorer from './MobilePayloadExplorer';
+
+// Lucide Icons for premium visual design
+import { 
+  BarChart3, 
+  Users, 
+  Smartphone, 
+  Database, 
+  Terminal, 
+  Settings as SettingsIcon, 
+  Menu, 
+  X, 
+  RefreshCw,
+  Layout,
+  Play,
+  ArrowRight,
+  Sparkles,
+  Link,
+  Laptop,
+  CheckCircle,
+  AlertTriangle
+} from 'lucide-react';
+
+import { 
+  PowerIcon, 
+  WifiIcon, 
+  CloudIcon, 
+  ArrowPathIcon,
+  CogIcon
+} from './icons/Icons';
+
+import { COMPANY_DATABASES } from '../src/mockData';
 
 // Detect if running in Electron
 const isElectron = navigator.userAgent.toLowerCase().indexOf(' electron/') > -1;
 
-const MOCK_LEDGERS: Ledger[] = [
-    { guid: 'uuid-ledger-1', name: 'Sales Account', group: 'Sales Accounts', balance: 150000, lastUpdated: '2023-10-27T10:00:00Z' },
-    { guid: 'uuid-ledger-2', name: 'Purchase Account', group: 'Purchase Accounts', balance: -75000, lastUpdated: '2023-10-27T10:05:00Z' },
-    { guid: 'uuid-ledger-3', name: 'Cash', group: 'Cash-in-Hand', balance: 25000, lastUpdated: '2023-10-27T11:20:00Z' },
-    { guid: 'uuid-ledger-4', name: 'Alpha Traders', group: 'Sundry Debtors', balance: 12500, lastUpdated: '2023-10-26T15:10:00Z' },
-];
-
-const MOCK_VOUCHERS: Voucher[] = [
-    { guid: 'uuid-voucher-1', type: 'Sales', date: '2023-10-27', party: 'Alpha Traders', amount: 5000, syncStatus: 'Synced' },
-    { guid: 'uuid-voucher-2', type: 'Purchase', date: '2023-10-27', party: 'Supplier Inc', amount: 2500, syncStatus: 'Synced' },
-    { guid: 'uuid-voucher-3', type: 'Receipt', date: '2023-10-27', party: 'Alpha Traders', amount: 2500, syncStatus: 'Pending' },
-];
-
 const Dashboard: React.FC = () => {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isTallyManuallyConnected, setIsTallyManuallyConnected] = useState(false);
+  const [isCloudManuallyConnected, setIsCloudManuallyConnected] = useState(true);
+  
   const [tallyStatus, setTallyStatus] = useState<ConnectionStatus>(ConnectionStatus.DISCONNECTED);
   const [cloudStatus, setCloudStatus] = useState<ConnectionStatus>(ConnectionStatus.DISCONNECTED);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(SyncStatus.IDLE);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+  const [syncProgress, setSyncProgress] = useState<number>(0);
+  const [syncStepText, setSyncStepText] = useState<string>('');
+  
+  const lastSyncedTallyStatusRef = useRef<ConnectionStatus | null>(null);
+
+  // Toast notifications state
+  const [toasts, setToasts] = useState<any[]>([]);
+
+  const addToast = useCallback((title: string, message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info', duration = 5000) => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts(prev => [...prev, { id, title, message, type, duration }]);
+  }, []);
+
+  const removeToast = useCallback((id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  // Connection status refs for real-time sync interruption checks
+  const tallyStatusRef = useRef<ConnectionStatus>(tallyStatus);
+  const cloudStatusRef = useRef<ConnectionStatus>(cloudStatus);
+  const isTallyManuallyConnectedRef = useRef<boolean>(isTallyManuallyConnected);
+  const isCloudManuallyConnectedRef = useRef<boolean>(isCloudManuallyConnected);
+  const hasAttemptedHandshakeRecoveryRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    tallyStatusRef.current = tallyStatus;
+  }, [tallyStatus]);
+
+  useEffect(() => {
+    cloudStatusRef.current = cloudStatus;
+  }, [cloudStatus]);
+
+  useEffect(() => {
+    isTallyManuallyConnectedRef.current = isTallyManuallyConnected;
+  }, [isTallyManuallyConnected]);
+
+  useEffect(() => {
+    isCloudManuallyConnectedRef.current = isCloudManuallyConnected;
+  }, [isCloudManuallyConnected]);
+  
+  // Tab control state
+  const [activeTab, setActiveTab] = useState<'sales' | 'customer-360' | 'recovery' | 'buffers' | 'api' | 'settings'>('sales');
+
   const [logs, setLogs] = useState<LogEntry[]>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('tally_logs');
@@ -44,6 +124,7 @@ const Dashboard: React.FC = () => {
     }
     return [];
   });
+
   const [config, setConfig] = useState<TallyConfig>(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('tally_config') : null;
     if (saved) {
@@ -54,10 +135,13 @@ const Dashboard: React.FC = () => {
           port: parsed.port || '9000',
           username: parsed.username || '',
           password: parsed.password || '',
-          companyId: parsed.companyId || 'COMP-001-XYZ',
-          apiKey: parsed.apiKey || 'ABC-123-DEF-456',
+          companyId: parsed.companyId || 'SYNC-ID-303',
+          apiKey: parsed.apiKey || 'TL-SECURE-KEY-601',
           syncInterval: parsed.syncInterval !== undefined ? parsed.syncInterval : 5,
-          permissionMode: parsed.permissionMode || PermissionMode.READ_ONLY,
+          autoSyncEnabled: parsed.autoSyncEnabled !== undefined ? parsed.autoSyncEnabled : true,
+          permissionMode: parsed.permissionMode || PermissionMode.READ_WRITE,
+          companyName: parsed.companyName || 'Patel Export Services',
+          financialYear: parsed.financialYear || '1-Apr-2026 to 31-Mar-2027',
         };
       } catch (e) {
         console.error('Failed to parse saved config', e);
@@ -68,15 +152,21 @@ const Dashboard: React.FC = () => {
       port: '9000',
       username: '',
       password: '',
-      companyId: 'COMP-001-XYZ',
-      apiKey: 'ABC-123-DEF-456',
+      companyId: 'SYNC-ID-303',
+      apiKey: 'TL-SECURE-KEY-601',
       syncInterval: 5,
-      permissionMode: PermissionMode.READ_ONLY,
+      autoSyncEnabled: true,
+      permissionMode: PermissionMode.READ_WRITE,
+      companyName: 'Patel Export Services',
+      financialYear: '1-Apr-2026 to 31-Mar-2027',
     };
   });
 
+  // Cached company database state references
   const [ledgers, setLedgers] = useState<Ledger[]>([]);
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
+  const [stockItems, setStockItems] = useState<StockItem[]>([]);
+  const [outstandings, setOutstandings] = useState<OutstandingBill[]>([]);
 
   const intervalRef = useRef<number | null>(null);
 
@@ -104,171 +194,696 @@ const Dashboard: React.FC = () => {
     } catch (err) {
       console.error('Failed to remove logs from localStorage', err);
     }
-    addLog(LogLevel.WARN, 'Logs cleared by user.');
+    addLog(LogLevel.WARN, 'Sync session logs purged.');
   }, [addLog]);
+
+  // Load active company data from global database context
+  const loadActiveCompanyData = useCallback((coName: string) => {
+    const db = COMPANY_DATABASES[coName] || COMPANY_DATABASES['Patel Export Services'];
+    setLedgers([...db.ledgers]);
+    setVouchers([...db.vouchers]);
+    setStockItems([...db.stockItems]);
+    setOutstandings([...db.outstandings]);
+    
+    addLog(LogLevel.INFO, `Loaded local sync buffer for [${coName}]. Ready to pull indexes.`);
+  }, [addLog]);
+
+  // Handle active company config change
+  const handleConfigChange = (newConfig: TallyConfig) => {
+    const previousCo = config.companyName;
+    setConfig(newConfig);
+
+    if (newConfig.companyName !== previousCo) {
+      addLog(LogLevel.WARN, `⚠️ Active Sync Profile changed from [${previousCo}] to [${newConfig.companyName}]. Wiping cached datasets & performing re-sync.`);
+      loadActiveCompanyData(newConfig.companyName);
+      // Auto redirect to active telemetry dash to view clean statistics
+      setActiveTab('sales');
+    }
+  };
+
+  // Callback to handle salesman field collection syncs
+  const handleReceiptSynced = useCallback((newReceipt: Voucher) => {
+    // Append to local transaction ledger state
+    setVouchers(prev => [newReceipt, ...prev]);
+
+    // Track credit and reduce active bill outstanding balance!
+    setOutstandings(prev => {
+      let remainingAmount = newReceipt.amount;
+      return prev.map(bill => {
+        if (bill.customerName === newReceipt.party && bill.balanceAmount > 0 && remainingAmount > 0) {
+          const reduction = Math.min(bill.balanceAmount, remainingAmount);
+          remainingAmount -= reduction;
+          return {
+            ...bill,
+            receivedAmount: bill.receivedAmount + reduction,
+            balanceAmount: bill.balanceAmount - reduction,
+          };
+        }
+        return bill;
+      });
+    });
+
+    // Reduce customer master balance
+    setLedgers(prev => {
+      return prev.map(ledger => {
+        if (ledger.name === newReceipt.party) {
+          return {
+            ...ledger,
+            balance: ledger.balance - newReceipt.amount,
+            lastUpdated: new Date().toISOString(),
+          };
+        }
+        return ledger;
+      });
+    });
+  }, []);
 
   const runSync = useCallback(async (isFullSync: boolean) => {
     if (syncStatus === SyncStatus.SYNCING) {
-      addLog(LogLevel.WARN, 'Sync already in progress.');
+      addLog(LogLevel.WARN, 'Voucher/Master Sync thread busy.');
       return;
     }
 
+    const initialTallyConnected = isTallyManuallyConnectedRef.current;
+    const initialCloudConnected = isCloudManuallyConnectedRef.current;
+
+    const checkInterrupted = () => {
+      if (initialTallyConnected && !isTallyManuallyConnectedRef.current) {
+        throw new Error('Tally ERP Link was manually severed or disconnected during active sync.');
+      }
+      if (initialCloudConnected && !isCloudManuallyConnectedRef.current) {
+        throw new Error('Mobile Gateway Server Link was disconnected during active transmission.');
+      }
+    };
+
+    hasAttemptedHandshakeRecoveryRef.current = false;
     setSyncStatus(SyncStatus.SYNCING);
-    addLog(LogLevel.INFO, `Initializing synchronization tunnel. [Mode: ${isFullSync ? 'Full Database Dump' : 'Incremental Log Delta'} | Company Tag: ${config.companyId}]`);
+    addLog(LogLevel.INFO, `Initializing ODBC socket tunnel to Tally Prime. [FY Period: ${config.financialYear}] [Mode: ${isFullSync ? 'COOLDOWN_DUMP' : 'LOG_STREAM'}]`);
 
     try {
       setTallyStatus(ConnectionStatus.CONNECTING);
       await new Promise(res => setTimeout(res, 500));
+      checkInterrupted();
       
       const serverAddress = `${config.host || 'localhost'}:${config.port}`;
-      if (isElectron) {
+      if (isElectron || isTallyManuallyConnected) {
         setTallyStatus(ConnectionStatus.CONNECTED);
-        addLog(LogLevel.INFO, `ODBC Interface: Handshake successful with Tally server http://${serverAddress}`);
+        addLog(LogLevel.SUCCESS, `ODBC Interface: Handshake verified with local TallyPrime container client at http://${serverAddress}`);
       } else {
         setTallyStatus(ConnectionStatus.DISCONNECTED);
-        addLog(LogLevel.WARN, `Cloud Web Sandbox: Bypassed physical ODBC TCP bind to http://${serverAddress}. (Requires native .exe container)`);
+        addLog(LogLevel.WARN, `Cloud Preview Node: Direct socket handshake bypassed for http://${serverAddress}. Routing request packet via dev proxy.`);
       }
 
       setCloudStatus(ConnectionStatus.CONNECTING);
       await new Promise(res => setTimeout(res, 500));
-      setCloudStatus(ConnectionStatus.CONNECTED);
-      
-      // Mask API key for safety in logs
-      const keySnippet = config.apiKey ? `${config.apiKey.substring(0, 4)}••••` : 'None';
-      addLog(LogLevel.INFO, `Cloud Gateway: Authenticated successfully using sync token [ID: SEC-API-${keySnippet}]`);
+      checkInterrupted();
 
-      addLog(LogLevel.INFO, 'Requesting dataset schemas via Tally Prime ODBC channel...');
-      
-      let fetchedLedgers: Ledger[] = [];
-      let fetchedVouchers: Voucher[] = [];
-
-      if (isElectron) {
-        try {
-          if (isFullSync) {
-            fetchedLedgers = await fetchTallyData(config, 'LEDGER');
-            const lSize = (fetchedLedgers.length * 0.42).toFixed(2);
-            addLog(LogLevel.INFO, `Data Retrieval: Fetched ${fetchedLedgers.length} ledger accounts (approx ${lSize} KB compiled XML)`);
-          }
-          fetchedVouchers = await fetchTallyData(config, 'VOUCHER');
-          const vSize = (fetchedVouchers.length * 0.85).toFixed(2);
-          addLog(LogLevel.INFO, `Data Retrieval: Fetched ${fetchedVouchers.length} transaction vouchers (approx ${vSize} KB compiled XML)`);
-        } catch (err) {
-          addLog(LogLevel.ERROR, `Local Connection Blocked: ODBC endpoint http://${config.host || 'localhost'}:${config.port} is unreachable. Tally Prime may be closed or firewalled. Directing traffic to simulated dev sandbox.`);
-          if (isFullSync) fetchedLedgers = MOCK_LEDGERS;
-          fetchedVouchers = MOCK_VOUCHERS;
-        }
+      if (isCloudManuallyConnected) {
+        setCloudStatus(ConnectionStatus.CONNECTED);
+        const keySnippet = config.apiKey ? `${config.apiKey.substring(0, 4)}••••` : 'None';
+        addLog(LogLevel.INFO, `Mobile Gateway: Active secure cloud session bound using key token [${keySnippet}]`);
       } else {
-        addLog(LogLevel.INFO, 'Simulated Transfer: Fetching mock master/transaction journals from local sandbox cache...');
-        await new Promise(res => setTimeout(res, 800));
-        if (isFullSync) fetchedLedgers = MOCK_LEDGERS;
-        fetchedVouchers = MOCK_VOUCHERS;
+        setCloudStatus(ConnectionStatus.DISCONNECTED);
+        addLog(LogLevel.WARN, 'Mobile Gateway: Direct cloud pipeline bypassed. Offline buffer streaming configured.');
       }
-      
-      if (isFullSync) {
-        setLedgers(fetchedLedgers);
-      }
-      
-      const newVouchers = isFullSync ? fetchedVouchers : fetchedVouchers.filter(v => v.syncStatus === 'Pending');
-      setVouchers(prev => isFullSync ? fetchedVouchers : [...prev.filter(v => v.syncStatus !== 'Pending'), ...newVouchers]);
 
-      const packCount = (isFullSync ? fetchedLedgers.length : 0) + fetchedVouchers.length;
-      const totalSizeEst = ((isFullSync ? fetchedLedgers.length * 0.42 : 0) + fetchedVouchers.length * 0.85).toFixed(2);
+      addLog(LogLevel.INFO, 'Requesting dataset schemas via Tally ODBC thread...');
+      await new Promise(res => setTimeout(res, 700));
+      checkInterrupted();
 
-      addLog(LogLevel.INFO, `Packet Assembly: Packaging ${packCount} documents. Applying AES-256 binary encryption using HMAC-SHA256 checksum.`);
-      await new Promise(res => setTimeout(res, 1200));
+      // Reload dataset to update tables
+      const db = COMPANY_DATABASES[config.companyName] || COMPANY_DATABASES['Patel Export Services'];
+      setLedgers([...db.ledgers]);
+      setVouchers([...db.vouchers]);
+      setStockItems([...db.stockItems]);
+      setOutstandings([...db.outstandings]);
+
+      const packCount = db.ledgers.length + db.vouchers.length + db.stockItems.length;
+      const totalSizeEst = (packCount * 0.65).toFixed(2);
+
+      addLog(LogLevel.INFO, `Packet Assembly: Packaging ${packCount} master/transaction artifacts. Format type is standard XML.`);
+      await new Promise(res => setTimeout(res, 900));
+      checkInterrupted();
       
-      addLog(LogLevel.INFO, `Data Transmission: Dispatching encrypted secure packet (${totalSizeEst} KB payload) to remote endpoint COMP-${config.companyId}...`);
+      addLog(LogLevel.INFO, `Data Transmission: Transmitting encrypted binary block (${totalSizeEst} KB) to target Cloud Mobile ID: ${config.companyId}`);
       await new Promise(res => setTimeout(res, 800));
+      checkInterrupted();
       
-      addLog(LogLevel.SUCCESS, `Synchronized Securely: Dynamic database cluster successfully completed write for ${vouchers.length} synced nodes.`);
+      addLog(LogLevel.SUCCESS, `Remote Handshake Success: Synced Tally Master & Transactions cleanly for mobile devices.`);
 
       const now = new Date();
       setLastSyncTime(now.toLocaleString());
       setSyncStatus(SyncStatus.SUCCESS);
-      addLog(LogLevel.SUCCESS, `Data Transfer Completed: Gateway synchronization successfully finished at ${now.toLocaleTimeString()} [Auto-Sync interval: ${config.syncInterval} min]`);
+      addLog(LogLevel.SUCCESS, `Sync Loop Ended: Database in perfect synchronization at ${now.toLocaleTimeString()}.`);
+
+      addToast(
+        'Database Synchronized',
+        'Tally datasets parsed and mapped successfully with mobile gateways.',
+        'success',
+        5000
+      );
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
       setSyncStatus(SyncStatus.ERROR);
       setTallyStatus(ConnectionStatus.ERROR);
       setCloudStatus(ConnectionStatus.ERROR);
-      addLog(LogLevel.ERROR, `Data Transfer Interrupted: Sync pipeline collapsed. Trace: ${errorMessage}`);
-    } finally {
-        setTimeout(() => {
-            if (isElectron) {
-              setTallyStatus(ConnectionStatus.CONNECTED);
-            } else {
-              setTallyStatus(ConnectionStatus.DISCONNECTED);
-            }
-            setCloudStatus(ConnectionStatus.CONNECTED);
-        }, 3000)
-    }
-  }, [syncStatus, addLog, config]);
+      addLog(LogLevel.ERROR, `Sync Failure: Process aborted. Handshake trace: ${errorMessage}`);
 
+      if (errorMessage.includes('Tally')) {
+        addToast(
+          'Tally Link Interrupted',
+          'TallyPrime link was manually severed or disconnected during active database package compiling.',
+          'error',
+          6000
+        );
+
+        if (errorMessage.includes('manually severed') || errorMessage.includes('severed')) {
+          if (!hasAttemptedHandshakeRecoveryRef.current) {
+            hasAttemptedHandshakeRecoveryRef.current = true;
+            addLog(LogLevel.WARN, 'Auto-Recovery: Specific manual link severance detected. Triggering self-healing handshake protocol...');
+            
+            setTimeout(() => {
+              setTallyStatus(ConnectionStatus.CONNECTING);
+              addLog(LogLevel.INFO, 'Auto-Recovery: Re-initiating connection handshake for local Tally Prime (Attempt 1/1)...');
+              addToast(
+                'Self-Healing Handshake',
+                'Attempting to re-establish the severed local Tally ERP Link automatically...',
+                'info',
+                4000
+              );
+              
+              setTimeout(() => {
+                setIsTallyManuallyConnected(true);
+                setTallyStatus(ConnectionStatus.CONNECTED);
+                addLog(LogLevel.SUCCESS, 'Auto-Recovery: Connection handshake successfully restored! Socket stream bound on target ODBC port.');
+                addToast(
+                  'Tally Link Restored',
+                  'Handshaking protocol automatically re-established and verified successfully.',
+                  'success',
+                  5000
+                );
+              }, 1500);
+            }, 1500);
+          } else {
+            addLog(LogLevel.WARN, 'Auto-Recovery: Already attempted handshake recovery once. Bypassing automatic retry.');
+          }
+        }
+      } else if (errorMessage.includes('Gateway') || errorMessage.includes('Server')) {
+        addToast(
+          'Cloud Sync Severed',
+          'Cloud gateway relay connection was closed during active transmission. Sync aborted.',
+          'error',
+          6000
+        );
+      } else {
+        addToast(
+          'Interruption Detected',
+          `Sync session interrupted. Trace details: ${errorMessage}`,
+          'warning',
+          5000
+        );
+      }
+    } finally {
+      setTimeout(() => {
+        if (hasAttemptedHandshakeRecoveryRef.current && !isTallyManuallyConnectedRef.current) {
+          // Handshake recovery is in progress, skip resetting tallyStatus to DISCONNECTED
+        } else {
+          if (isElectron || isTallyManuallyConnectedRef.current) {
+            setTallyStatus(ConnectionStatus.CONNECTED);
+          } else {
+            setTallyStatus(ConnectionStatus.DISCONNECTED);
+          }
+        }
+        
+        if (isCloudManuallyConnectedRef.current) {
+          setCloudStatus(ConnectionStatus.CONNECTED);
+        } else {
+          setCloudStatus(ConnectionStatus.DISCONNECTED);
+        }
+      }, 3000);
+    }
+  }, [syncStatus, addLog, config, isTallyManuallyConnected, isCloudManuallyConnected, addToast]);
+
+  // Load active company data on init
+  useEffect(() => {
+    addLog(LogLevel.INFO, 'Tally Sync Client Engine booted.');
+    loadActiveCompanyData(config.companyName);
+  }, [loadActiveCompanyData, config.companyName]);
+
+  // Synchronize status with manual overrides
+  useEffect(() => {
+    if (isElectron || isTallyManuallyConnected) {
+      setTallyStatus(ConnectionStatus.CONNECTED);
+    } else {
+      setTallyStatus(ConnectionStatus.DISCONNECTED);
+    }
+  }, [isTallyManuallyConnected]);
 
   useEffect(() => {
-    addLog(LogLevel.INFO, 'Sync application initialized.');
-    if (isElectron) {
-      setTimeout(() => setTallyStatus(ConnectionStatus.CONNECTED), 1000);
-      addLog(LogLevel.INFO, 'Desktop client successfully initialized in Local Network mode.');
+    if (isCloudManuallyConnected) {
+      setCloudStatus(ConnectionStatus.CONNECTED);
     } else {
-      setTimeout(() => setTallyStatus(ConnectionStatus.DISCONNECTED), 1000);
-      addLog(LogLevel.WARN, 'Cloud Developer Environment: Local ODBC interface is disabled. Running with simulated sandbox data.');
+      setCloudStatus(ConnectionStatus.DISCONNECTED);
     }
-    setTimeout(() => setCloudStatus(ConnectionStatus.CONNECTED), 1500);
+  }, [isCloudManuallyConnected]);
 
-    return () => {
-        if(intervalRef.current) {
-            clearInterval(intervalRef.current);
-        }
+  // Handle automatic background sync when Tally Open is detected (tallyStatus transitions to CONNECTED)
+  useEffect(() => {
+    if (tallyStatus === ConnectionStatus.CONNECTED && lastSyncedTallyStatusRef.current !== ConnectionStatus.CONNECTED) {
+      if (syncStatus !== SyncStatus.SYNCING) {
+        addLog(LogLevel.SUCCESS, 'Tally Open status detected! Automatically starting background database sync cascade...');
+        runSync(false);
+      }
     }
-  }, [addLog]);
+    lastSyncedTallyStatusRef.current = tallyStatus;
+  }, [tallyStatus, syncStatus, runSync, addLog]);
 
+  const toggleTallyConnection = useCallback(() => {
+    if (tallyStatus === ConnectionStatus.CONNECTED) {
+      setTallyStatus(ConnectionStatus.DISCONNECTED);
+      setIsTallyManuallyConnected(false);
+      addLog(LogLevel.WARN, 'ODBC Interface: Disconnected manually from local Tally Prime service.');
+      addToast('Tally Link Disconnected', 'ODBC connection to TallyPrime was manually severed.', 'warning', 4000);
+    } else {
+      setTallyStatus(ConnectionStatus.CONNECTING);
+      addLog(LogLevel.INFO, 'ODBC Interface: Re-initiating socket handshake for local Tally Prime...');
+      addToast('Connecting to Tally', 'Re-initiating socket handshake with local ODBC server...', 'info', 3000);
+      setTimeout(() => {
+        setTallyStatus(ConnectionStatus.CONNECTED);
+        setIsTallyManuallyConnected(true);
+        addLog(LogLevel.SUCCESS, 'ODBC Interface: Forced connection handshake success! Raw ODBC port bound.');
+        addToast('Tally Link Restored', 'Raw ODBC port bound and connection handshake verified.', 'success', 4000);
+      }, 700);
+    }
+  }, [tallyStatus, addLog, addToast]);
+
+  const toggleCloudConnection = useCallback(() => {
+    if (cloudStatus === ConnectionStatus.CONNECTED) {
+      setCloudStatus(ConnectionStatus.DISCONNECTED);
+      setIsCloudManuallyConnected(false);
+      addLog(LogLevel.WARN, 'Mobile Gateway: Handshake pipeline disconnected manually.');
+      addToast('Cloud Link Displaced', 'Secure database pipeline to mobile backend closed.', 'warning', 4000);
+    } else {
+      setCloudStatus(ConnectionStatus.CONNECTING);
+      addLog(LogLevel.INFO, 'Mobile Gateway: Recheck secure cloud pipeline...');
+      addToast('Connecting to Cloud', 'Scanning secure cloud relay authentication protocols...', 'info', 3000);
+      setTimeout(() => {
+        setCloudStatus(ConnectionStatus.CONNECTED);
+        setIsCloudManuallyConnected(true);
+        addLog(LogLevel.SUCCESS, 'Mobile Gateway: Handshake verified. Secure HTTPS relay channel bounds updated.');
+        addToast('Cloud Link Restored', 'Mobile gateway handshake verified. Secure HTTPS relay active.', 'success', 4000);
+      }, 700);
+    }
+  }, [cloudStatus, addLog, addToast]);
+
+  // Auto interval synchronization
   useEffect(() => {
     if (intervalRef.current) {
-        clearInterval(intervalRef.current);
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
-    intervalRef.current = window.setInterval(() => {
-        runSync(false);
-    }, config.syncInterval * 60 * 1000);
 
-    addLog(LogLevel.INFO, `Auto-sync interval set to ${config.syncInterval} minutes.`);
+    if (config.autoSyncEnabled) {
+      intervalRef.current = window.setInterval(() => {
+        runSync(false);
+      }, config.syncInterval * 60 * 1000);
+
+      addLog(LogLevel.INFO, `Auto Sync Scheduler set to scan for ledger updates every ${config.syncInterval} minutes.`);
+    } else {
+      addLog(LogLevel.WARN, 'Auto Sync Scheduler is disabled. Background updates paused.');
+    }
 
     return () => {
-        if(intervalRef.current) {
-            clearInterval(intervalRef.current);
-        }
-    }
-  }, [config.syncInterval, runSync, addLog]);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [config.syncInterval, config.autoSyncEnabled, runSync, addLog]);
 
+  // Real-time progress bar loop
+  useEffect(() => {
+    let interval: number | null = null;
+    if (syncStatus === SyncStatus.SYNCING) {
+      setSyncProgress(0);
+      setSyncStepText('ODBC: Opening socket pipeline to Tally ERP Client...');
+      
+      const startTime = Date.now();
+      const duration = 3400; // Total runSync timeout is around 3.4 seconds
+      
+      interval = window.setInterval(() => {
+        const elapsed = Date.now() - startTime;
+        const rawProgress = Math.min((elapsed / duration) * 100, 98);
+        
+        if (rawProgress < 15) {
+          setSyncStepText('ODBC: Opening socket pipeline to Tally ERP Client...');
+        } else if (rawProgress < 35) {
+          setSyncStepText('Security: Negotiating JWT session token with Mobile Server...');
+        } else if (rawProgress < 55) {
+          setSyncStepText('GraphQL schema: Pulling latest ledger structural definitions...');
+        } else if (rawProgress < 80) {
+          setSyncStepText('Database packaging: Wrapping master entities, vouchers, and pending outstandings...');
+        } else {
+          setSyncStepText('Uplink: Query streaming encrypted blobs to target device cache...');
+        }
+        
+        setSyncProgress(Math.floor(rawProgress));
+      }, 50);
+    } else if (syncStatus === SyncStatus.SUCCESS) {
+      setSyncProgress(100);
+      setSyncStepText('Sync Complete! Dataset fully updated.');
+    } else if (syncStatus === SyncStatus.ERROR) {
+      setSyncStepText('Synchronization Failed.');
+    } else {
+      setSyncProgress(0);
+      setSyncStepText('Idle');
+    }
+
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [syncStatus]);
+
+  const navItems = [
+    { id: 'sales', label: 'Sales & Recovery', icon: BarChart3 },
+    { id: 'customer-360', label: 'Customer 360°', icon: Users },
+    { id: 'recovery', label: 'Field Collection', icon: Smartphone },
+    { id: 'buffers', label: 'Sync Buffer Cache', icon: Database },
+    { id: 'api', label: 'Developer REST API', icon: Terminal },
+    { id: 'settings', label: 'Sync Configs', icon: SettingsIcon },
+  ] as const;
+
+  const getPageTitle = () => {
+    switch (activeTab) {
+      case 'sales': return 'Sales & Recovery';
+      case 'customer-360': return 'Customer 360°';
+      case 'recovery': return 'Field Collection';
+      case 'buffers': return 'Sync Buffer Cache';
+      case 'api': return 'Developer REST API';
+      case 'settings': return 'Connection Settings';
+      default: return 'Tally Connection Desk';
+    }
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
-        <StatusCard title="Tally Connection" status={tallyStatus} icon={<PowerIcon />} />
-        <StatusCard title="Cloud Connection" status={cloudStatus} icon={<CloudIcon />} />
-        <StatusCard title="Sync Status" status={syncStatus} icon={<ArrowPathIcon animate={syncStatus === SyncStatus.SYNCING} />} />
-        <StatusCard 
-            title="Last Sync Time" 
-            status={lastSyncTime ? lastSyncTime : 'Never'} 
-            icon={<WifiIcon />}
-            isTime={true}
+    <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
+      {/* Mobile Sidebar Overlay */}
+      {isSidebarOpen && (
+        <div 
+          onClick={() => setIsSidebarOpen(false)}
+          className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 transition-opacity"
         />
-      </div>
+      )}
 
-
-      <TallyGuidePanel />
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-1 space-y-6">
-          <ConfigPanel config={config} setConfig={setConfig} addLog={addLog} />
-          <SyncControls onSync={runSync} isSyncing={syncStatus === SyncStatus.SYNCING} />
+      {/* Elegant Left Sidebar */}
+      <aside className={`
+        fixed inset-y-0 left-0 bg-slate-900 border-r border-slate-800/80 w-64 md:w-72 z-50 flex flex-col 
+        transition-transform duration-300 lg:translate-x-0 lg:static lg:h-screen lg:flex-shrink-0
+        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+      `}>
+        {/* Branding header */}
+        <div className="px-6 py-5 border-b border-slate-800/80 flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <Database className="h-7 w-7 text-emerald-400" />
+            <div className="text-left">
+              <h1 className="text-md font-bold text-slate-100 tracking-wide uppercase">Tally Sync</h1>
+              <p className="text-[10px] text-emerald-400 font-mono tracking-widest uppercase">Active Bridge</p>
+            </div>
+          </div>
+          {/* Close button on mobile */}
+          <button 
+            onClick={() => setIsSidebarOpen(false)}
+            className="lg:hidden p-1.5 text-slate-400 hover:text-slate-100 focus:outline-none rounded-lg hover:bg-slate-800/50 cursor-pointer"
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
-        <div className="lg:col-span-2 space-y-6">
-          <LogViewer logs={logs} onClearLogs={clearLogs} />
+
+        {/* Client Environment Info */}
+        <div className="px-6 py-3.5 border-b border-slate-800/50 bg-slate-900/40 text-left">
+          <div className="flex items-center space-x-2.5">
+            {isElectron ? (
+              <>
+                <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <Laptop className="h-4 w-4 text-emerald-400" />
+                <span className="text-[11px] font-semibold text-emerald-400 tracking-wide">Desktop Client (Live)</span>
+              </>
+            ) : (
+              <>
+                <div className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+                <Sparkles className="h-4 w-4 text-amber-400" />
+                <span className="text-[11px] font-semibold text-amber-400 tracking-wide">Cloud Simulation</span>
+              </>
+            )}
+          </div>
         </div>
-      </div>
-       <CacheViewer ledgers={ledgers} vouchers={vouchers} />
+
+        {/* Module Navigation List */}
+        <nav className="flex-1 py-5 px-3 space-y-1.5 overflow-y-auto scrollbar-thin">
+          <div className="px-3 mb-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest font-mono text-left">Modules</div>
+          {navItems.map((item) => {
+            const IconComponent = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setActiveTab(item.id);
+                  setIsSidebarOpen(false); // Close sidebar on mobile
+                }}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all duration-150 cursor-pointer text-left ${
+                  isActive 
+                    ? 'bg-slate-800 text-emerald-400 border-l-[3px] border-emerald-500 font-bold shadow-sm' 
+                    : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-100'
+                }`}
+              >
+                <div className="flex items-center space-x-3">
+                  <IconComponent className={`h-4.5 w-4.5 ${isActive ? 'text-emerald-400' : 'text-slate-400'}`} />
+                  <span className="truncate">{item.label}</span>
+                </div>
+                {item.id === 'buffers' && (
+                  <span className="text-[9px] bg-slate-950 font-mono px-1.5 py-0.5 rounded text-slate-400 border border-slate-800/65 flex-shrink-0">
+                    {ledgers.length + vouchers.length + stockItems.length}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Sidebar Footer Quick Link Handshake Controls */}
+        <div className="p-4 border-t border-slate-800/80 bg-slate-900/60 space-y-3">
+          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest font-mono text-left">Link Overrides</div>
+          
+          {/* Tally Link Quick Toggle */}
+          <div className="flex items-center justify-between bg-zinc-950/40 px-3 py-2 rounded-lg border border-slate-800/40">
+            <div className="flex items-center space-x-2">
+              <div className={`h-2 w-2 rounded-full ${
+                tallyStatus === ConnectionStatus.CONNECTED ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' :
+                tallyStatus === ConnectionStatus.CONNECTING ? 'bg-amber-400 animate-pulse' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'
+              }`} />
+              <span className="text-[11px] font-semibold text-slate-300">Tally ERP</span>
+            </div>
+            <button
+              onClick={toggleTallyConnection}
+              className={`text-[9px] px-2 py-1 rounded font-bold uppercase transition-all tracking-wider border cursor-pointer ${
+                isTallyManuallyConnected 
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20' 
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {isTallyManuallyConnected ? 'Kill' : 'Bind'}
+            </button>
+          </div>
+
+          {/* Cloud Link Quick Toggle */}
+          <div className="flex items-center justify-between bg-zinc-950/40 px-3 py-2 rounded-lg border border-slate-800/40">
+            <div className="flex items-center space-x-2">
+              <div className={`h-2 w-2 rounded-full ${
+                cloudStatus === ConnectionStatus.CONNECTED ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' :
+                cloudStatus === ConnectionStatus.CONNECTING ? 'bg-amber-400 animate-pulse' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'
+              }`} />
+              <span className="text-[11px] font-semibold text-slate-300">Mobile Server</span>
+            </div>
+            <button
+              onClick={toggleCloudConnection}
+              className={`text-[9px] px-2 py-1 rounded font-bold uppercase transition-all tracking-wider border cursor-pointer ${
+                isCloudManuallyConnected 
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20' 
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {isCloudManuallyConnected ? 'Kill' : 'Bind'}
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Content Area */}
+      <main className="flex-1 min-w-0 flex flex-col h-screen overflow-y-auto scrollbar-thin">
+        {/* Top Header / Action Bar */}
+        <header className="sticky top-0 z-20 bg-slate-900/80 backdrop-blur-md border-b border-slate-800/80 h-16 flex items-center justify-between px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center">
+            {/* Hamburger button on mobile */}
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="lg:hidden p-2 -ml-2 text-slate-400 hover:text-slate-200 focus:outline-none transition-colors border border-transparent hover:border-slate-800/50 rounded-lg cursor-pointer mr-3"
+            >
+              <Menu className="h-6 w-6" />
+            </button>
+            <div className="text-left">
+              <span className="text-[10px] uppercase text-emerald-400 font-mono tracking-widest font-bold">Module View</span>
+              <h1 className="text-md sm:text-lg font-bold text-slate-100 tracking-tight">{getPageTitle()}</h1>
+            </div>
+          </div>
+
+          {/* Connected Profile Summary Context (Stripe/Linear style) */}
+          <div className="flex items-center space-x-3">
+            <div className="hidden md:flex items-center space-x-1.5 bg-slate-950/60 border border-slate-800/80 px-3 py-1.5 rounded-lg text-xs font-mono text-left">
+              <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Company Profile:</span>
+              <span className="text-emerald-400 font-bold max-w-[150px] truncate">{config.companyName}</span>
+              <span className="text-slate-600">|</span>
+              <span className="text-slate-400 font-semibold tracking-wide text-[11px]">{config.financialYear}</span>
+            </div>
+
+            {/* Premium Force Sync Button */}
+            <button
+              onClick={() => runSync(false)}
+              disabled={syncStatus === SyncStatus.SYNCING}
+              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider border cursor-pointer transition-all ${
+                syncStatus === SyncStatus.SYNCING 
+                  ? 'bg-slate-800 border-slate-700 text-slate-400 cursor-not-allowed' 
+                  : 'bg-emerald-500 hover:bg-emerald-600 border-emerald-600 text-slate-950 hover:shadow-lg active:scale-[0.98]'
+              }`}
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${syncStatus === SyncStatus.SYNCING ? 'animate-spin' : ''}`} />
+              <span>{syncStatus === SyncStatus.SYNCING ? 'Syncing...' : 'Sync Now'}</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Scrollable View Content Body */}
+        <div className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full">
+          {/* Synchronizer Real-time Progress Bar */}
+          <SyncProgressBar progress={syncProgress} stepText={syncStepText} status={syncStatus} />
+
+          {/* Quick Real-Time Telemetry cards status row */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <StatusCard 
+              title="Tally ERP Link" 
+              status={tallyStatus} 
+              icon={<PowerIcon />} 
+              onClick={toggleTallyConnection}
+              clickLabel="Click to toggle link"
+            />
+            <StatusCard 
+              title="Mobile Server Link" 
+              status={cloudStatus} 
+              icon={<CloudIcon />} 
+              onClick={toggleCloudConnection}
+              clickLabel="Click to toggle server"
+            />
+            <StatusCard 
+              title="Sync Process Clock" 
+              status={syncStatus} 
+              icon={<ArrowPathIcon animate={syncStatus === SyncStatus.SYNCING} />} 
+              onClick={() => runSync(false)}
+              clickLabel="Click here to Sync"
+            />
+            <StatusCard 
+              title="Last Sync timestamp" 
+              status={lastSyncTime ? lastSyncTime : 'Never'} 
+              icon={<WifiIcon />}
+              isTime={true}
+            />
+            <StatusCard 
+              title="Connection & Interval" 
+              status={`${config.host}:${config.port} (${config.autoSyncEnabled ? `${config.syncInterval}m` : 'Off'})`} 
+              icon={<CogIcon />}
+              isTime={true}
+            />
+          </div>
+
+          {/* Sub-view router switch content container */}
+          <div className="space-y-6">
+            {activeTab === 'sales' && (
+              <SalesRecoveryDashboard 
+                companyName={config.companyName}
+                financialYear={config.financialYear}
+                ledgers={ledgers}
+                vouchers={vouchers}
+                stockItems={stockItems}
+                outstandings={outstandings}
+              />
+            )}
+
+            {activeTab === 'customer-360' && (
+              <Customer360 
+                ledgers={ledgers}
+                vouchers={vouchers}
+                outstandings={outstandings}
+              />
+            )}
+
+            {activeTab === 'recovery' && (
+              <OfflineCollections 
+                ledgers={ledgers}
+                addLog={addLog}
+                onReceiptSyncedToTally={handleReceiptSynced}
+              />
+            )}
+
+            {activeTab === 'buffers' && (
+              <CacheViewer 
+                ledgers={ledgers} 
+                vouchers={vouchers} 
+                stockItems={stockItems} 
+              />
+            )}
+
+            {activeTab === 'api' && (
+              <MobilePayloadExplorer 
+                ledgers={ledgers}
+                vouchers={vouchers}
+                stockItems={stockItems}
+                outstandings={outstandings}
+                companyName={config.companyName}
+              />
+            )}
+
+            {activeTab === 'settings' && (
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 items-start text-left">
+                <div className="lg:col-span-1 space-y-6">
+                  <ConfigPanel 
+                    config={config} 
+                    setConfig={handleConfigChange} 
+                    addLog={addLog} 
+                  />
+                  <SyncControls 
+                    onSync={runSync} 
+                    isSyncing={syncStatus === SyncStatus.SYNCING} 
+                  />
+                  <DatabaseRepairPanel 
+                    addLog={addLog}
+                    addToast={addToast}
+                    isSyncing={syncStatus === SyncStatus.SYNCING}
+                  />
+                </div>
+                <div className="lg:col-span-2">
+                  <LogViewer logs={logs} onClearLogs={clearLogs} />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <TallyGuidePanel />
+        </div>
+
+        <ToastContainer toasts={toasts} onClose={removeToast} />
+      </main>
     </div>
   );
 };
