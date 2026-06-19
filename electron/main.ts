@@ -1,7 +1,6 @@
 
 import { app, BrowserWindow } from 'electron';
 import * as path from 'path';
-import isDev from 'electron-is-dev';
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -15,6 +14,8 @@ function createWindow() {
     title: "Tally Data Sync",
     backgroundColor: '#0f172a', // slate-900
   });
+
+  const isDev = !app.isPackaged;
 
   if (isDev) {
     win.loadURL('http://localhost:3000');

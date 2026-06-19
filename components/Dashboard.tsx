@@ -71,6 +71,18 @@ const Dashboard: React.FC = () => {
   const [syncProgress, setSyncProgress] = useState<number>(0);
   const [syncStepText, setSyncStepText] = useState<string>('');
   
+  const [isAutoSyncSuspended, setIsAutoSyncSuspended] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('tally_auto_sync_suspended');
+      return saved === 'true';
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('tally_auto_sync_suspended', String(isAutoSyncSuspended));
+  }, [isAutoSyncSuspended]);
+  
   const lastSyncedTallyStatusRef = useRef<ConnectionStatus | null>(null);
 
   // Toast notifications state
@@ -451,13 +463,13 @@ const Dashboard: React.FC = () => {
   // Handle automatic background sync when Tally Open is detected (tallyStatus transitions to CONNECTED)
   useEffect(() => {
     if (tallyStatus === ConnectionStatus.CONNECTED && lastSyncedTallyStatusRef.current !== ConnectionStatus.CONNECTED) {
-      if (syncStatus !== SyncStatus.SYNCING) {
+      if (syncStatus !== SyncStatus.SYNCING && !isAutoSyncSuspended) {
         addLog(LogLevel.SUCCESS, 'Tally Open status detected! Automatically starting background database sync cascade...');
         runSync(false);
       }
     }
     lastSyncedTallyStatusRef.current = tallyStatus;
-  }, [tallyStatus, syncStatus, runSync, addLog]);
+  }, [tallyStatus, syncStatus, runSync, addLog, isAutoSyncSuspended]);
 
   const toggleTallyConnection = useCallback(() => {
     if (tallyStatus === ConnectionStatus.CONNECTED) {
@@ -504,14 +516,18 @@ const Dashboard: React.FC = () => {
       intervalRef.current = null;
     }
 
-    if (config.autoSyncEnabled) {
+    if (config.autoSyncEnabled && !isAutoSyncSuspended) {
       intervalRef.current = window.setInterval(() => {
         runSync(false);
       }, config.syncInterval * 60 * 1000);
 
       addLog(LogLevel.INFO, `Auto Sync Scheduler set to scan for ledger updates every ${config.syncInterval} minutes.`);
     } else {
-      addLog(LogLevel.WARN, 'Auto Sync Scheduler is disabled. Background updates paused.');
+      if (isAutoSyncSuspended) {
+        addLog(LogLevel.WARN, 'Auto Sync Scheduler is temporarily suspended. Background updates paused.');
+      } else {
+        addLog(LogLevel.WARN, 'Auto Sync Scheduler is disabled. Background updates paused.');
+      }
     }
 
     return () => {
@@ -520,7 +536,7 @@ const Dashboard: React.FC = () => {
         intervalRef.current = null;
       }
     };
-  }, [config.syncInterval, config.autoSyncEnabled, runSync, addLog]);
+  }, [config.syncInterval, config.autoSyncEnabled, runSync, addLog, isAutoSyncSuspended]);
 
   // Real-time progress bar loop
   useEffect(() => {
@@ -719,6 +735,34 @@ const Dashboard: React.FC = () => {
               {isCloudManuallyConnected ? 'Kill' : 'Bind'}
             </button>
           </div>
+
+          {/* Auto-Sync Quick Pause Toggle */}
+          <div className="flex items-center justify-between bg-zinc-950/40 px-3 py-2 rounded-lg border border-slate-800/40">
+            <div className="flex items-center space-x-2">
+              <div className={`h-2 w-2 rounded-full ${isAutoSyncSuspended ? 'bg-rose-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.5)]' : 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]'}`} />
+              <span className="text-[11px] font-semibold text-slate-300">Auto-Sync</span>
+            </div>
+            <button
+              onClick={() => {
+                const nextState = !isAutoSyncSuspended;
+                setIsAutoSyncSuspended(nextState);
+                addLog(LogLevel.WARN, nextState ? 'Auto-Sync temporarily suspended.' : 'Auto-Sync resumed.');
+                addToast(
+                  nextState ? 'Auto-Sync Stopped' : 'Auto-Sync Resumed',
+                  nextState ? 'Automatic syncing is now temporarily stopped.' : 'Automatic background syncing has been resumed.',
+                  nextState ? 'warning' : 'success',
+                  3000
+                );
+              }}
+              className={`text-[9px] px-2 py-1 rounded font-bold uppercase transition-all tracking-wider border cursor-pointer ${
+                isAutoSyncSuspended 
+                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 hover:bg-rose-500/20' 
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {isAutoSyncSuspended ? 'Resume' : 'Pause'}
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -749,6 +793,30 @@ const Dashboard: React.FC = () => {
               <span className="text-slate-400 font-semibold tracking-wide text-[11px]">{config.financialYear}</span>
             </div>
 
+            {/* Auto-Sync Temporary Pause Switch in Header */}
+            <button
+              onClick={() => {
+                const nextState = !isAutoSyncSuspended;
+                setIsAutoSyncSuspended(nextState);
+                addLog(LogLevel.WARN, nextState ? 'Auto-Sync temporarily suspended.' : 'Auto-Sync resumed.');
+                addToast(
+                  nextState ? 'Auto-Sync Stopped' : 'Auto-Sync Resumed',
+                  nextState ? 'Automatic syncing and connection prompts are temporarily stopped.' : 'Automatic background syncing has been resumed.',
+                  nextState ? 'warning' : 'success',
+                  4000
+                );
+              }}
+              className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border cursor-pointer transition-all ${
+                isAutoSyncSuspended 
+                  ? 'bg-rose-950/30 border-rose-800/50 text-rose-400 hover:bg-rose-950/50' 
+                  : 'bg-slate-850 border-slate-700/60 text-emerald-400 hover:bg-slate-800'
+              }`}
+              title={isAutoSyncSuspended ? "Click to Resume Auto-Syncing" : "Click to Temporarily Pause Auto-Syncing"}
+            >
+              <div className={`h-1.5 w-1.5 rounded-full ${isAutoSyncSuspended ? 'bg-rose-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.5)]' : 'bg-emerald-500 animate-ping'}`} />
+              <span>{isAutoSyncSuspended ? 'Auto-Sync: Off' : 'Auto-Sync: On'}</span>
+            </button>
+
             {/* Premium Force Sync Button */}
             <button
               onClick={() => runSync(false)}
@@ -769,6 +837,30 @@ const Dashboard: React.FC = () => {
         <div className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full">
           {/* Synchronizer Real-time Progress Bar */}
           <SyncProgressBar progress={syncProgress} stepText={syncStepText} status={syncStatus} />
+
+          {isAutoSyncSuspended && (
+            <div className="bg-rose-950/30 border border-rose-800/45 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-rose-200 text-xs shadow-md animate-fade-in text-left">
+              <div className="flex items-start sm:items-center space-x-3 text-left">
+                <AlertTriangle className="h-5 w-5 text-rose-400 shrink-0 mt-0.5 sm:mt-0" />
+                <div>
+                  <span className="font-bold block text-sm">Temporary Auto-Sync Stop Activated</span>
+                  <span className="text-slate-300 mt-0.5 block leading-relaxed">
+                    Automatic background syncing and connection prompts are currently paused to prevent installation collisions or database lock errors. Clicking "Sync Now" will still run a manual sync.
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setIsAutoSyncSuspended(false);
+                  addLog(LogLevel.INFO, 'Auto-Sync resumed.');
+                  addToast('Auto-Sync Resumed', 'Automatic background syncing has been resumed.', 'success', 3000);
+                }}
+                className="bg-rose-900 hover:bg-rose-800 text-white font-bold py-1.5 px-3 rounded-lg text-[10px] uppercase shadow transition-all shrink-0 cursor-pointer self-start sm:self-center"
+              >
+                Resume Auto-Sync
+              </button>
+            </div>
+          )}
 
           {/* Quick Real-Time Telemetry cards status row */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
