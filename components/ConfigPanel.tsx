@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { type TallyConfig, PermissionMode, LogLevel } from '../types';
 import { CogIcon } from './icons/Icons';
+import { fetchTallyCompanies } from '../src/services/tallyService';
 
 interface ConfigPanelProps {
   config: TallyConfig;
@@ -25,6 +26,47 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, setConfig, addLog }) 
   const [showSavedFeedback, setShowSavedFeedback] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showWarningModal, setShowWarningModal] = useState(false);
+
+  const [fetchedCompanies, setFetchedCompanies] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('tally_fetched_companies');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [isFetchingCompanies, setIsFetchingCompanies] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  const allAvailableCompanies = Array.from(new Set([...PRESET_COMPANIES, ...fetchedCompanies]));
+
+  const handleFetchCompanies = async () => {
+    setIsFetchingCompanies(true);
+    setFetchError(null);
+    addLog(LogLevel.INFO, `Connecting to Tally Prime ODBC endpoint at http://${draft.host}:${draft.port}...`);
+    try {
+      const companies = await fetchTallyCompanies(draft);
+      if (companies && companies.length > 0) {
+        setFetchedCompanies(companies);
+        localStorage.setItem('tally_fetched_companies', JSON.stringify(companies));
+        
+        // Auto-fill company name if empty
+        if (!draft.companyName) {
+          handleChange('companyName', companies[0]);
+        }
+        
+        addLog(LogLevel.SUCCESS, `Successfully retrieved ${companies.length} company profile(s) from local Tally: ${companies.join(', ')}`);
+      } else {
+        throw new Error('No active or loaded companies found in Tally Prime. Please open a company first.');
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Connection refused';
+      setFetchError(errMsg);
+      addLog(LogLevel.ERROR, `Failed to retrieve company list from Tally: ${errMsg}. Make sure Tally Prime is running, has ODBC enabled on port ${draft.port}, and is accessible.`);
+    } finally {
+      setIsFetchingCompanies(false);
+    }
+  };
 
   useEffect(() => {
     setDraft({ ...config });
@@ -106,18 +148,65 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, setConfig, addLog }) 
             
             <div className="space-y-3">
               <div>
-                <label htmlFor="tally-company-select" className="block text-xs font-medium text-slate-400 mb-1">Company Name</label>
-                <select
-                  id="tally-company-select"
-                  value={draft.companyName || ''}
-                  onChange={(e) => handleChange('companyName', e.target.value)}
-                  className="block w-full bg-slate-800 border border-slate-700/80 rounded-md py-1.5 px-3 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 text-xs text-slate-200"
-                >
-                  <option value="">-- Choose Tally Profile --</option>
-                  {PRESET_COMPANIES.map(comp => (
-                    <option key={comp} value={comp}>{comp}</option>
+                <label htmlFor="tally-company-input" className="block text-xs font-medium text-slate-400 mb-1">Company Name</label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      list="tally-companies-list"
+                      id="tally-company-input"
+                      type="text"
+                      value={draft.companyName || ''}
+                      onChange={(e) => handleChange('companyName', e.target.value)}
+                      placeholder="Type or select company name..."
+                      className="block w-full bg-slate-800 border border-slate-700/80 rounded-md py-1.5 px-3 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 text-xs text-slate-200"
+                    />
+                    <datalist id="tally-companies-list">
+                      {allAvailableCompanies.map(comp => (
+                        <option key={comp} value={comp} />
+                      ))}
+                    </datalist>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleFetchCompanies}
+                    disabled={isFetchingCompanies}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-semibold rounded-md text-xs transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+                    title="Query active loaded companies from running local Tally Prime instance"
+                  >
+                    {isFetchingCompanies ? (
+                      <span className="flex items-center gap-1">
+                        <span className="h-3 w-3 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block" />
+                        <span>Querying...</span>
+                      </span>
+                    ) : (
+                      <span>Fetch from Tally</span>
+                    )}
+                  </button>
+                </div>
+                
+                {fetchError && (
+                  <p className="mt-1 text-[10px] text-rose-400 font-medium">
+                    ⚠️ {fetchError}. You can still type your company name manually.
+                  </p>
+                )}
+
+                <div className="mt-2 flex flex-wrap gap-1.5 items-center">
+                  <span className="text-[10px] text-slate-500">Quick Select:</span>
+                  {allAvailableCompanies.map(comp => (
+                    <button
+                      key={comp}
+                      type="button"
+                      onClick={() => handleChange('companyName', comp)}
+                      className={`text-[10px] px-2 py-0.5 rounded transition-all border cursor-pointer ${
+                        draft.companyName === comp 
+                          ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-400 font-bold' 
+                          : 'bg-slate-850 border-slate-700 text-slate-400 hover:text-slate-300'
+                      }`}
+                    >
+                      {comp}
+                    </button>
                   ))}
-                </select>
+                </div>
               </div>
 
               <div>

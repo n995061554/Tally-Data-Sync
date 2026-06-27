@@ -43,6 +43,104 @@ const VOUCHER_XML_REQUEST = `
 </ENVELOPE>
 `;
 
+/**
+ * Tally XML Request for List of Companies
+ */
+const COMPANY_XML_REQUEST = `
+<ENVELOPE>
+    <HEADER>
+        <TALLYREQUEST>Export Data</TALLYREQUEST>
+    </HEADER>
+    <BODY>
+        <EXPORTDATA>
+            <REQUESTDESC>
+                <REPORTNAME>List of Companies</REPORTNAME>
+                <STATICVARIABLES>
+                    <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+                </STATICVARIABLES>
+            </REQUESTDESC>
+        </EXPORTDATA>
+    </BODY>
+</ENVELOPE>
+`;
+
+export const fetchTallyCompanies = async (config: TallyConfig): Promise<string[]> => {
+  const host = config.host || 'localhost';
+  const url = `http://${host}:${config.port}`;
+  const xml = COMPANY_XML_REQUEST;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'text/xml',
+  };
+
+  if (config.username || config.password) {
+    try {
+      const credentials = btoa(`${config.username || ''}:${config.password || ''}`);
+      headers['Authorization'] = `Basic ${credentials}`;
+    } catch (e) {
+      console.warn('Failed to encode Tally credentials', e);
+    }
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: xml,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Tally response error: ${response.statusText}`);
+    }
+
+    const text = await response.text();
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(text, "text/xml");
+
+    const companies: string[] = [];
+    
+    // Attempt 1: Parse standard <COMPANY> elements
+    const companyNodes = xmlDoc.getElementsByTagName('COMPANY');
+    if (companyNodes.length > 0) {
+      for (let i = 0; i < companyNodes.length; i++) {
+        const node = companyNodes[i];
+        const nameNode = node.getElementsByTagName('NAME')[0] || node;
+        const name = nameNode.textContent?.trim();
+        if (name && !companies.includes(name)) {
+          companies.push(name);
+        }
+      }
+    }
+
+    // Attempt 2: If no <COMPANY> tag, check any <NAME> tags
+    if (companies.length === 0) {
+      const nameNodes = xmlDoc.getElementsByTagName('NAME');
+      for (let i = 0; i < nameNodes.length; i++) {
+        const name = nameNodes[i].textContent?.trim();
+        if (name && !companies.includes(name)) {
+          companies.push(name);
+        }
+      }
+    }
+
+    // Attempt 3: If still empty, check for <COMPANYNAME> tags
+    if (companies.length === 0) {
+      const coNameNodes = xmlDoc.getElementsByTagName('COMPANYNAME');
+      for (let i = 0; i < coNameNodes.length; i++) {
+        const name = coNameNodes[i].textContent?.trim();
+        if (name && !companies.includes(name)) {
+          companies.push(name);
+        }
+      }
+    }
+
+    return companies;
+  } catch (error) {
+    console.error('Error fetching companies from Tally:', error);
+    throw error;
+  }
+};
+
 export const fetchTallyData = async (config: TallyConfig, type: 'LEDGER' | 'VOUCHER'): Promise<any[]> => {
   const host = config.host || 'localhost';
   const url = `http://${host}:${config.port}`;

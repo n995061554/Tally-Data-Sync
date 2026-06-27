@@ -55,6 +55,7 @@ import {
 } from './icons/Icons';
 
 import { COMPANY_DATABASES } from '../src/mockData';
+import { fetchTallyData } from '../src/services/tallyService';
 
 // Detect if running in Electron
 const isElectron = navigator.userAgent.toLowerCase().indexOf(' electron/') > -1;
@@ -325,12 +326,45 @@ const Dashboard: React.FC = () => {
 
       // Reload dataset to update tables
       const db = COMPANY_DATABASES[config.companyName] || COMPANY_DATABASES['Patel Export Services'];
-      setLedgers([...db.ledgers]);
-      setVouchers([...db.vouchers]);
+      let syncedLedgers = [...db.ledgers];
+      let syncedVouchers = [...db.vouchers];
+      
+      if (isElectron || isTallyManuallyConnected) {
+        try {
+          addLog(LogLevel.INFO, `ODBC Query: Fetching live Ledgers from active Tally company "${config.companyName || 'Default'}"...`);
+          const realLedgers = await fetchTallyData(config, 'LEDGER');
+          if (realLedgers && realLedgers.length > 0) {
+            syncedLedgers = realLedgers;
+            addLog(LogLevel.SUCCESS, `ODBC Query Success: Synced ${realLedgers.length} master Ledgers directly from local Tally Prime.`);
+          } else {
+            addLog(LogLevel.WARN, `ODBC Query returned empty Ledgers list. Utilizing cached local dataset fallback.`);
+          }
+        } catch (err) {
+          addLog(LogLevel.WARN, `Live Tally ODBC Ledger query failed: ${err instanceof Error ? err.message : err}. Falling back to cached local dataset.`);
+        }
+
+        try {
+          addLog(LogLevel.INFO, `ODBC Query: Fetching live Vouchers from active Tally company "${config.companyName || 'Default'}"...`);
+          const realVouchers = await fetchTallyData(config, 'VOUCHER');
+          if (realVouchers && realVouchers.length > 0) {
+            syncedVouchers = realVouchers;
+            addLog(LogLevel.SUCCESS, `ODBC Query Success: Synced ${realVouchers.length} transaction Vouchers directly from local Tally Prime.`);
+          } else {
+            addLog(LogLevel.WARN, `ODBC Query returned empty Vouchers list. Utilizing cached local dataset fallback.`);
+          }
+        } catch (err) {
+          addLog(LogLevel.WARN, `Live Tally ODBC Voucher query failed: ${err instanceof Error ? err.message : err}. Falling back to cached local dataset.`);
+        }
+      } else {
+        addLog(LogLevel.INFO, `Cloud Dev Node: Emulating ODBC data pipeline for company "${config.companyName || 'Default'}".`);
+      }
+
+      setLedgers(syncedLedgers);
+      setVouchers(syncedVouchers);
       setStockItems([...db.stockItems]);
       setOutstandings([...db.outstandings]);
 
-      const packCount = db.ledgers.length + db.vouchers.length + db.stockItems.length;
+      const packCount = syncedLedgers.length + syncedVouchers.length + db.stockItems.length;
       const totalSizeEst = (packCount * 0.65).toFixed(2);
 
       addLog(LogLevel.INFO, `Packet Assembly: Packaging ${packCount} master/transaction artifacts. Format type is standard XML.`);
