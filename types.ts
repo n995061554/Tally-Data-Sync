@@ -43,6 +43,11 @@ export interface TallyConfig {
   permissionMode: PermissionMode;
   companyName: string;         // e.g. "Patel Export Services"
   financialYear: string;       // e.g. "2026-2027"
+  autoRetryOnDrop?: boolean;   // Auto-retry mechanism for connection drops
+  useTallyCloud?: boolean;     // Enable Tally Cloud integration mode
+  tallyCloudUrl?: string;      // Tally Cloud endpoint/API URL
+  tallyCloudApiKey?: string;   // Secret key to authenticate with Tally Cloud instance
+  tallyCloudCompany?: string;  // Active company name on Tally Cloud
 }
 
 export interface Ledger {

@@ -1,8 +1,7 @@
-
 import { type TallyConfig, type Ledger, type Voucher } from '../../types';
 
 /**
- * Tally XML Request for Ledgers
+ * Tally XML Request for Ledgers (Report format)
  */
 const LEDGER_XML_REQUEST = `
 <ENVELOPE>
@@ -23,7 +22,28 @@ const LEDGER_XML_REQUEST = `
 `;
 
 /**
- * Tally XML Request for Vouchers
+ * Tally XML Request for Ledgers (Collection format - more robust)
+ */
+const LEDGER_COLLECTION_XML_REQUEST = `
+<ENVELOPE>
+  <HEADER>
+    <TALLYREQUEST>Export Data</TALLYREQUEST>
+  </HEADER>
+  <BODY>
+    <EXPORTDATA>
+      <REQUESTDESC>
+        <STATICVARIABLES>
+          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        </STATICVARIABLES>
+        <COLLECTIONNAME>Ledger</COLLECTIONNAME>
+      </REQUESTDESC>
+    </EXPORTDATA>
+  </BODY>
+</ENVELOPE>
+`;
+
+/**
+ * Tally XML Request for Vouchers (Report format)
  */
 const VOUCHER_XML_REQUEST = `
 <ENVELOPE>
@@ -44,7 +64,28 @@ const VOUCHER_XML_REQUEST = `
 `;
 
 /**
- * Tally XML Request for List of Companies
+ * Tally XML Request for Vouchers (Collection format - more robust)
+ */
+const VOUCHER_COLLECTION_XML_REQUEST = `
+<ENVELOPE>
+  <HEADER>
+    <TALLYREQUEST>Export Data</TALLYREQUEST>
+  </HEADER>
+  <BODY>
+    <EXPORTDATA>
+      <REQUESTDESC>
+        <STATICVARIABLES>
+          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        </STATICVARIABLES>
+        <COLLECTIONNAME>Voucher</COLLECTIONNAME>
+      </REQUESTDESC>
+    </EXPORTDATA>
+  </BODY>
+</ENVELOPE>
+`;
+
+/**
+ * Tally XML Request for List of Companies (Report format)
  */
 const COMPANY_XML_REQUEST = `
 <ENVELOPE>
@@ -64,10 +105,30 @@ const COMPANY_XML_REQUEST = `
 </ENVELOPE>
 `;
 
+/**
+ * Tally XML Request for List of Companies (Collection format - more robust)
+ */
+const COMPANY_COLLECTION_XML_REQUEST = `
+<ENVELOPE>
+  <HEADER>
+    <TALLYREQUEST>Export Data</TALLYREQUEST>
+  </HEADER>
+  <BODY>
+    <EXPORTDATA>
+      <REQUESTDESC>
+        <STATICVARIABLES>
+          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        </STATICVARIABLES>
+        <COLLECTIONNAME>Company</COLLECTIONNAME>
+      </REQUESTDESC>
+    </EXPORTDATA>
+  </BODY>
+</ENVELOPE>
+`;
+
 export const fetchTallyCompanies = async (config: TallyConfig): Promise<string[]> => {
   const host = config.host || 'localhost';
   const url = `http://${host}:${config.port}`;
-  const xml = COMPANY_XML_REQUEST;
 
   const headers: Record<string, string> = {
     'Content-Type': 'text/xml',
@@ -82,11 +143,11 @@ export const fetchTallyCompanies = async (config: TallyConfig): Promise<string[]
     }
   }
 
-  try {
+  const tryRequest = async (xmlPayload: string): Promise<string[]> => {
     const response = await fetch(url, {
       method: 'POST',
       headers,
-      body: xml,
+      body: xmlPayload,
     });
 
     if (!response.ok) {
@@ -135,8 +196,24 @@ export const fetchTallyCompanies = async (config: TallyConfig): Promise<string[]
     }
 
     return companies;
+  };
+
+  try {
+    // Attempt 1: Standard List of Companies Report XML
+    const firstAttempt = await tryRequest(COMPANY_XML_REQUEST);
+    if (firstAttempt.length > 0) {
+      return firstAttempt;
+    }
   } catch (error) {
-    console.error('Error fetching companies from Tally:', error);
+    console.warn('First company fetch attempt failed, trying collection query...', error);
+  }
+
+  // Attempt 2: Collection-based Company XML
+  try {
+    const secondAttempt = await tryRequest(COMPANY_COLLECTION_XML_REQUEST);
+    return secondAttempt;
+  } catch (error) {
+    console.error('All company fetch attempts failed:', error);
     throw error;
   }
 };
@@ -144,7 +221,6 @@ export const fetchTallyCompanies = async (config: TallyConfig): Promise<string[]
 export const fetchTallyData = async (config: TallyConfig, type: 'LEDGER' | 'VOUCHER'): Promise<any[]> => {
   const host = config.host || 'localhost';
   const url = `http://${host}:${config.port}`;
-  const xml = type === 'LEDGER' ? LEDGER_XML_REQUEST : VOUCHER_XML_REQUEST;
 
   const headers: Record<string, string> = {
     'Content-Type': 'text/xml',
@@ -159,11 +235,11 @@ export const fetchTallyData = async (config: TallyConfig, type: 'LEDGER' | 'VOUC
     }
   }
 
-  try {
+  const tryRequest = async (xmlPayload: string): Promise<any[]> => {
     const response = await fetch(url, {
       method: 'POST',
       headers,
-      body: xml,
+      body: xmlPayload,
     });
 
     if (!response.ok) {
@@ -174,7 +250,6 @@ export const fetchTallyData = async (config: TallyConfig, type: 'LEDGER' | 'VOUC
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(text, "text/xml");
 
-    // Basic parsing logic (this would need to be more robust for real Tally XML)
     if (type === 'LEDGER') {
       const ledgers: Ledger[] = [];
       const ledgerNodes = xmlDoc.getElementsByTagName('LEDGER');
@@ -205,8 +280,28 @@ export const fetchTallyData = async (config: TallyConfig, type: 'LEDGER' | 'VOUC
       }
       return vouchers;
     }
+  };
+
+  // Run the data fetching with fallbacks
+  const primaryXml = type === 'LEDGER' ? LEDGER_XML_REQUEST : VOUCHER_XML_REQUEST;
+  const secondaryXml = type === 'LEDGER' ? LEDGER_COLLECTION_XML_REQUEST : VOUCHER_COLLECTION_XML_REQUEST;
+
+  try {
+    // Attempt 1: Report XML
+    const data = await tryRequest(primaryXml);
+    if (data && data.length > 0) {
+      return data;
+    }
   } catch (error) {
-    console.error(`Error fetching ${type} from Tally:`, error);
+    console.warn(`Primary XML fetch failed for ${type}, trying secondary collection XML...`, error);
+  }
+
+  try {
+    // Attempt 2: Collection XML (highly robust fallback)
+    const data = await tryRequest(secondaryXml);
+    return data;
+  } catch (error) {
+    console.error(`Both XML attempts failed for ${type}:`, error);
     throw error;
   }
 };
