@@ -48,6 +48,7 @@ export interface TallyConfig {
   tallyCloudUrl?: string;      // Tally Cloud endpoint/API URL
   tallyCloudApiKey?: string;   // Secret key to authenticate with Tally Cloud instance
   tallyCloudCompany?: string;  // Active company name on Tally Cloud
+  tallyInstallationPath?: string; // Tally application executable path
 }
 
 export interface Ledger {

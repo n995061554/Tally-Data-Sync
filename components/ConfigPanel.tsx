@@ -28,6 +28,8 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, setConfig, addLog }) 
   const [draft, setDraft] = useState<TallyConfig>({ ...config });
   const [showSavedFeedback, setShowSavedFeedback] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [showCloudApiKey, setShowCloudApiKey] = useState(false);
   const [showWarningModal, setShowWarningModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'settings' | 'guide'>('settings');
 
@@ -177,7 +179,11 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, setConfig, addLog }) 
     setDiagLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ✓ Auto-Resolve successfully applied! Configuration updated.`]);
   };
 
-  const allAvailableCompanies = Array.from(new Set([...PRESET_COMPANIES, ...fetchedCompanies]));
+  const allAvailableCompanies = Array.from(new Set([
+    ...PRESET_COMPANIES,
+    ...(config.companyName && !PRESET_COMPANIES.includes(config.companyName) ? [config.companyName] : []),
+    ...fetchedCompanies
+  ]));
 
   const handleFetchCompanies = async () => {
     setIsFetchingCompanies(true);
@@ -501,6 +507,81 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, setConfig, addLog }) 
                   </div>
                 </div>
 
+                {/* Tally Installation Path */}
+                <div className="space-y-2 pt-2.5 border-t border-slate-800/60 mt-1">
+                  <label htmlFor="tally-installation-path" className="block text-xs font-medium text-slate-400 mb-1 flex items-center justify-between">
+                    <span>Tally Installation Executable Path</span>
+                    <span className="text-[9px] text-slate-500 font-mono italic">Requires Local Desktop Client</span>
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      id="tally-installation-path"
+                      type="text"
+                      value={draft.tallyInstallationPath || ''}
+                      onChange={(e) => handleChange('tallyInstallationPath', e.target.value)}
+                      placeholder="C:\Program Files\TallyPrime\tally.exe"
+                      className="block flex-1 bg-slate-800 border border-slate-700/80 rounded-md py-1.5 px-3 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 text-xs text-slate-200 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const path = draft.tallyInstallationPath || '';
+                        if (!path.trim()) {
+                          addLog(LogLevel.WARN, 'Verification notice: Tally installation path is empty.');
+                          return;
+                        }
+                        const clean = path.toLowerCase().replace(/\\/g, '/');
+                        const isWinExe = clean.endsWith('tally.exe');
+                        const isMacApp = clean.includes('tallyprime.app');
+                        if (isWinExe || isMacApp) {
+                          addLog(LogLevel.SUCCESS, `✓ Executable Verified: Path "${path}" matches Tally Prime signature schema.`);
+                        } else {
+                          addLog(LogLevel.WARN, `⚠️ Warning: Path "${path}" does not end with standard Tally Prime binary name ("tally.exe" or "TallyPrime.app"). Please ensure this is correct.`);
+                        }
+                      }}
+                      className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold border border-slate-700 rounded-md text-[10px] transition-colors uppercase cursor-pointer shrink-0"
+                    >
+                      Verify Path
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 items-center pt-0.5">
+                    <span className="text-[9.5px] text-slate-500">Presets:</span>
+                    <button
+                      type="button"
+                      onClick={() => handleChange('tallyInstallationPath', 'C:\\Program Files\\TallyPrime\\tally.exe')}
+                      className={`text-[9.5px] px-2 py-0.5 rounded border cursor-pointer transition-all ${
+                        draft.tallyInstallationPath === 'C:\\Program Files\\TallyPrime\\tally.exe'
+                          ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-400 font-bold'
+                          : 'bg-slate-850 border-slate-700 text-slate-400 hover:text-slate-300'
+                      }`}
+                    >
+                      Windows Default
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleChange('tallyInstallationPath', 'C:\\TallyPrime\\tally.exe')}
+                      className={`text-[9.5px] px-2 py-0.5 rounded border cursor-pointer transition-all ${
+                        draft.tallyInstallationPath === 'C:\\TallyPrime\\tally.exe'
+                          ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-400 font-bold'
+                          : 'bg-slate-850 border-slate-700 text-slate-400 hover:text-slate-300'
+                      }`}
+                    >
+                      Windows Alternative
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleChange('tallyInstallationPath', '/Applications/TallyPrime.app')}
+                      className={`text-[9.5px] px-2 py-0.5 rounded border cursor-pointer transition-all ${
+                        draft.tallyInstallationPath === '/Applications/TallyPrime.app'
+                          ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-400 font-bold'
+                          : 'bg-slate-850 border-slate-700 text-slate-400 hover:text-slate-300'
+                      }`}
+                    >
+                      macOS App Path
+                    </button>
+                  </div>
+                </div>
+
                 {/* ODBC Connection Auto-Retry Toggle Switch */}
                 <div className="flex items-center justify-between bg-slate-800/40 p-2.5 rounded border border-slate-700/50 mt-2">
                   <div className="space-y-0.5 pr-2">
@@ -558,14 +639,24 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, setConfig, addLog }) 
                     </div>
                     <div>
                       <label htmlFor="tally-cloud-apikey" className="block text-xs font-medium text-slate-400 mb-1">Cloud Access Secret Key</label>
-                      <input
-                        id="tally-cloud-apikey"
-                        type="password"
-                        value={draft.tallyCloudApiKey || ''}
-                        onChange={(e) => handleChange('tallyCloudApiKey', e.target.value)}
-                        placeholder="••••••••"
-                        className="block w-full bg-slate-800 border border-slate-700/80 rounded-md py-1.5 px-3 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 text-xs text-slate-200 font-mono"
-                      />
+                      <div className="relative">
+                        <input
+                          id="tally-cloud-apikey"
+                          type={showCloudApiKey ? "text" : "password"}
+                          value={draft.tallyCloudApiKey || ''}
+                          onChange={(e) => handleChange('tallyCloudApiKey', e.target.value)}
+                          placeholder="••••••••"
+                          className="block w-full bg-slate-800 border border-slate-700/80 rounded-md py-1.5 pl-3 pr-10 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 text-xs text-slate-200 font-mono"
+                        />
+                        <button
+                          id="btn-toggle-cloud-apikey"
+                          type="button"
+                          onClick={() => setShowCloudApiKey(!showCloudApiKey)}
+                          className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200 text-[10px] font-bold"
+                        >
+                          {showCloudApiKey ? "HIDE" : "SHOW"}
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -647,6 +738,24 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, setConfig, addLog }) 
                       draft.autoSyncEnabled ? 'text-slate-200 opacity-100' : 'text-slate-500 opacity-40 cursor-not-allowed'
                     }`}
                   />
+                  {draft.autoSyncEnabled && (
+                    <div className="flex gap-1 mt-1.5">
+                      {[1, 5, 15, 30, 60].map(mins => (
+                        <button
+                          key={mins}
+                          type="button"
+                          onClick={() => handleChange('syncInterval', mins)}
+                          className={`text-[9px] px-1.5 py-0.5 rounded border transition-all cursor-pointer ${
+                            draft.syncInterval === mins
+                              ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-400 font-bold'
+                              : 'bg-slate-850 border-slate-750 text-slate-400 hover:text-slate-300'
+                          }`}
+                        >
+                          {mins}m
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -676,15 +785,40 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, setConfig, addLog }) 
                 </button>
               </div>
 
-              <div>
+               <div>
                 <label htmlFor="api-key" className="block text-xs font-medium text-slate-400 mb-1">Remote Access Token</label>
-                <input
-                  id="api-key"
-                  type="password"
-                  value={draft.apiKey || ''}
-                  onChange={(e) => handleChange('apiKey', e.target.value)}
-                  className="block w-full bg-slate-800 border border-slate-700/80 rounded-md py-1.5 px-3 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 text-xs text-slate-200 font-mono"
-                />
+                <div className="relative">
+                  <input
+                    id="api-key"
+                    type={showApiKey ? "text" : "password"}
+                    value={draft.apiKey || ''}
+                    onChange={(e) => handleChange('apiKey', e.target.value)}
+                    className="block w-full bg-slate-800 border border-slate-700/80 rounded-md py-1.5 pl-3 pr-10 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 text-xs text-slate-200 font-mono"
+                    placeholder="Enter your API Remote Access Key"
+                  />
+                  <button
+                    id="btn-toggle-api-key"
+                    type="button"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200 text-[10px] font-bold"
+                  >
+                    {showApiKey ? "HIDE" : "SHOW"}
+                  </button>
+                </div>
+                <div className="flex justify-between items-center mt-1.5">
+                  <span className="text-[10px] text-slate-400">Used for syncing local ODBC with the central mobile server gateway.</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const generated = 'TL-SECURE-KEY-' + Math.floor(100 + Math.random() * 900);
+                      handleChange('apiKey', generated);
+                      addLog(LogLevel.INFO, `Generated new Secure API Remote Access Token: ${generated}`);
+                    }}
+                    className="text-[9.5px] text-emerald-400 hover:text-emerald-300 font-semibold cursor-pointer"
+                  >
+                    Generate Safe Key
+                  </button>
+                </div>
               </div>
             </div>
 

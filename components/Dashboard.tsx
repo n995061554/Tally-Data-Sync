@@ -58,7 +58,7 @@ import {
 } from './icons/Icons';
 
 import { COMPANY_DATABASES, type CompanyData } from '../src/mockData';
-import { fetchTallyData } from '../src/services/tallyService';
+import { fetchTallyData, fetchTallyCompanies } from '../src/services/tallyService';
 
 // Helper to resolve custom or preset company data
 const getCompanyDatabase = (coName: string): CompanyData => {
@@ -191,6 +191,7 @@ const Dashboard: React.FC = () => {
           tallyCloudUrl: parsed.tallyCloudUrl || 'https://api.tallycloud.net/v1',
           tallyCloudApiKey: parsed.tallyCloudApiKey || 'TC-ADMIN-X702',
           tallyCloudCompany: parsed.tallyCloudCompany || 'Patel Export Services Cloud',
+          tallyInstallationPath: parsed.tallyInstallationPath || 'C:\\Program Files\\TallyPrime\\tally.exe',
         };
       } catch (e) {
         console.error('Failed to parse saved config', e);
@@ -213,6 +214,7 @@ const Dashboard: React.FC = () => {
       tallyCloudUrl: 'https://api.tallycloud.net/v1',
       tallyCloudApiKey: 'TC-ADMIN-X702',
       tallyCloudCompany: 'Patel Export Services Cloud',
+      tallyInstallationPath: 'C:\\Program Files\\TallyPrime\\tally.exe',
     };
   });
 
@@ -348,17 +350,39 @@ const Dashboard: React.FC = () => {
       await new Promise(res => setTimeout(res, 500));
       checkInterrupted();
       
+      let tallyActive = false;
       if (config.useTallyCloud) {
         setTallyStatus(ConnectionStatus.CONNECTED);
         addLog(LogLevel.SUCCESS, `Tally Cloud Interface: Successfully authenticated and handshaked with remote Tally Cloud instance at ${config.tallyCloudUrl}`);
+        tallyActive = true;
       } else {
         const serverAddress = `${config.host || 'localhost'}:${config.port}`;
+        let odbcOnline = false;
+        
         if (isElectron || isTallyManuallyConnected) {
+          odbcOnline = true;
+        } else {
+          try {
+            addLog(LogLevel.INFO, `ODBC Probe: Probing local Tally Prime ODBC endpoint at http://${serverAddress}...`);
+            const probeCompanies = await fetchTallyCompanies(config);
+            if (probeCompanies && probeCompanies.length > 0) {
+              odbcOnline = true;
+              setIsTallyManuallyConnected(true);
+              addLog(LogLevel.SUCCESS, `✓ ODBC Auto-Detect: Local Tally Prime process detected and reachable! Automatically binding Tally ERP link.`);
+            }
+          } catch (e) {
+            odbcOnline = false;
+          }
+        }
+
+        if (odbcOnline) {
           setTallyStatus(ConnectionStatus.CONNECTED);
           addLog(LogLevel.SUCCESS, `ODBC Interface: Handshake verified with local TallyPrime container client at http://${serverAddress}`);
+          tallyActive = true;
         } else {
           setTallyStatus(ConnectionStatus.DISCONNECTED);
-          addLog(LogLevel.WARN, `Cloud Preview Node: Direct socket handshake bypassed for http://${serverAddress}. Routing request packet via dev proxy.`);
+          addLog(LogLevel.WARN, `Cloud Preview Node: Direct socket handshake bypassed or CORS blocked for http://${serverAddress}. Routing request packet via dev proxy.`);
+          addLog(LogLevel.INFO, `💡 Tip: To sync real data from your local Tally, please open this app in the Electron desktop client, or install a 'CORS Unblock' browser extension, and toggle Tally ERP to 'Bind' under Link Overrides in the sidebar.`);
         }
       }
 
@@ -461,7 +485,7 @@ const Dashboard: React.FC = () => {
         } catch (err) {
           addLog(LogLevel.WARN, `Live Tally Cloud Voucher query failed: ${err instanceof Error ? err.message : err}. Falling back to cached database.`);
         }
-      } else if (isElectron || isTallyManuallyConnected) {
+      } else if (isElectron || isTallyManuallyConnected || tallyActive) {
         try {
           addLog(LogLevel.INFO, `ODBC Query: Fetching live Ledgers from active Tally company "${config.companyName || 'Default'}"...`);
           const realLedgers = await fetchTallyData(config, 'LEDGER');

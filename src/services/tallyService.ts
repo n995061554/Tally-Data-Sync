@@ -250,31 +250,96 @@ export const fetchTallyData = async (config: TallyConfig, type: 'LEDGER' | 'VOUC
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(text, "text/xml");
 
+    // Helper to query elements with fallback tags (supports both uppercase and lowercase, and namespaced tags)
+    const findNodeText = (parent: Element, selectors: string[]): string | null => {
+      for (const selector of selectors) {
+        try {
+          const el = parent.querySelector(selector);
+          if (el && el.textContent) {
+            return el.textContent.trim();
+          }
+        } catch (e) {
+          // ignore selector syntax failures
+        }
+      }
+      
+      // Fallback: manually scan child nodes to support custom or namespaced tags (e.g. UDF:NAME)
+      const childNodes = parent.children;
+      for (let i = 0; i < childNodes.length; i++) {
+        const child = childNodes[i];
+        const tagName = child.tagName || '';
+        const cleanTagName = tagName.replace(/^.*:/, '').toUpperCase(); // strip namespace prefix
+        
+        for (const selector of selectors) {
+          const cleanSelector = selector.replace(/^.*:/, '').toUpperCase();
+          if (cleanTagName === cleanSelector && child.textContent) {
+            return child.textContent.trim();
+          }
+        }
+      }
+      return null;
+    };
+
     if (type === 'LEDGER') {
       const ledgers: Ledger[] = [];
-      const ledgerNodes = xmlDoc.getElementsByTagName('LEDGER');
-      for (let i = 0; i < ledgerNodes.length; i++) {
-        const node = ledgerNodes[i];
+      // Support finding <LEDGER> tags in namespaced or lowercase documents
+      const ledgerNodes = Array.from(xmlDoc.querySelectorAll('LEDGER, ledger'))
+        .concat(Array.from(xmlDoc.getElementsByTagNameNS('*', 'LEDGER')))
+        .concat(Array.from(xmlDoc.getElementsByTagNameNS('*', 'ledger')));
+        
+      // Deduplicate nodes
+      const uniqueLedgerNodes = Array.from(new Set(ledgerNodes));
+
+      for (let i = 0; i < uniqueLedgerNodes.length; i++) {
+        const node = uniqueLedgerNodes[i];
+        const guid = node.getAttribute('REMOTEID') || node.getAttribute('remoteid') || `ledger-${i}`;
+        
+        const name = findNodeText(node, ['NAME', 'name', 'NAME.LIST > NAME']) || node.getAttribute('NAME') || node.getAttribute('name') || 'Unknown';
+        const group = findNodeText(node, ['PARENT', 'parent', 'PARENTNAME', 'parentname', 'GROUP', 'group']) || 'Unknown';
+        const rawBalance = findNodeText(node, ['OPENINGBALANCE', 'openingbalance', 'BALANCE', 'balance', 'AMOUNT', 'amount']) || '0';
+        
+        // Clean up Tally numbers which might look like "1,20,000.00 Dr" or "-120000.00"
+        let balance = parseFloat(rawBalance.replace(/,/g, ''));
+        if (isNaN(balance)) balance = 0;
+        if (rawBalance.toUpperCase().includes('CR')) {
+          balance = -Math.abs(balance);
+        }
+
         ledgers.push({
-          guid: node.getAttribute('REMOTEID') || `ledger-${i}`,
-          name: node.getElementsByTagName('NAME')[0]?.textContent || 'Unknown',
-          group: node.getElementsByTagName('PARENT')[0]?.textContent || 'Unknown',
-          balance: parseFloat(node.getElementsByTagName('OPENINGBALANCE')[0]?.textContent || '0'),
+          guid,
+          name,
+          group,
+          balance,
           lastUpdated: new Date().toISOString(),
         });
       }
       return ledgers;
     } else {
       const vouchers: Voucher[] = [];
-      const voucherNodes = xmlDoc.getElementsByTagName('VOUCHER');
-      for (let i = 0; i < voucherNodes.length; i++) {
-        const node = voucherNodes[i];
+      const voucherNodes = Array.from(xmlDoc.querySelectorAll('VOUCHER, voucher'))
+        .concat(Array.from(xmlDoc.getElementsByTagNameNS('*', 'VOUCHER')))
+        .concat(Array.from(xmlDoc.getElementsByTagNameNS('*', 'voucher')));
+        
+      const uniqueVoucherNodes = Array.from(new Set(voucherNodes));
+
+      for (let i = 0; i < uniqueVoucherNodes.length; i++) {
+        const node = uniqueVoucherNodes[i];
+        const guid = node.getAttribute('REMOTEID') || node.getAttribute('remoteid') || `voucher-${i}`;
+        
+        const rawType = findNodeText(node, ['VOUCHERTYPENAME', 'vouchertypename', 'VOUCHERTYPE', 'vouchertype']) || 'Sales';
+        const date = findNodeText(node, ['DATE', 'date']) || 'Unknown';
+        const party = findNodeText(node, ['PARTYLEDGERNAME', 'partyledgername', 'PARTYNAME', 'partyname', 'PARTY', 'party']) || 'Unknown';
+        const rawAmount = findNodeText(node, ['AMOUNT', 'amount']) || '0';
+        
+        let amount = parseFloat(rawAmount.replace(/,/g, ''));
+        if (isNaN(amount)) amount = 0;
+
         vouchers.push({
-          guid: node.getAttribute('REMOTEID') || `voucher-${i}`,
-          type: (node.getElementsByTagName('VOUCHERTYPENAME')[0]?.textContent || 'Sales') as Voucher['type'],
-          date: node.getElementsByTagName('DATE')[0]?.textContent || 'Unknown',
-          party: node.getElementsByTagName('PARTYLEDGERNAME')[0]?.textContent || 'Unknown',
-          amount: parseFloat(node.getElementsByTagName('AMOUNT')[0]?.textContent || '0'),
+          guid,
+          type: (rawType.charAt(0).toUpperCase() + rawType.slice(1).toLowerCase()) as Voucher['type'],
+          date,
+          party,
+          amount,
           syncStatus: 'Pending',
         });
       }
